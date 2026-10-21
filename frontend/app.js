@@ -284,6 +284,14 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+function formatDeadline(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = part => String(part).padStart(2, "0");
+  return `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 async function showDashboard(page = 1) {
   state.view = "home";
   state.surveyToken = "";
@@ -644,6 +652,7 @@ function deadlineInput(form) {
     ? new Date(current.getTime() - current.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
     : "";
   const control = textInput({ type: "datetime-local", value: localValue });
+  control.lang = "zh-CN";
   section.append(inputField("停止收集时间", control, "留空并点击“清除”表示不限时。发布后不能修改。"));
   section.append(node("div", { className: "actions" }, [
     button("保存截止时间", () => safe(async () => {
@@ -680,7 +689,7 @@ function renderSurvey(form) {
     statusBadge(form.status),
     node("span", { className: "badge", text: form.allow_anonymous ? "匿名问卷" : "实名问卷" }),
     node("span", { className: "badge", text: form.allow_multiple_submissions ? "允许重复填写" : "每人限填一次" }),
-    node("span", { className: "badge", text: form.deadline ? `截止 ${formatDate(form.deadline)}` : "不限截止时间" }),
+    node("span", { className: "badge", text: form.deadline ? `截止 ${formatDeadline(form.deadline)}` : "不限截止时间" }),
   ]);
   summary.append(meta);
   if (form.status === "published") {
