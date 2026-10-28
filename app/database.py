@@ -15,6 +15,50 @@ def create_indexes(db):
         [("form_id", 1), ("order", 1)], unique=True, name="unique_form_order",
         partialFilterExpression={"form_id": {"$exists": True}, "order": {"$exists": True}},
     )
+    db.Question_resources.create_index(
+        [("owner_id", 1), ("created_at", -1), ("_id", -1)],
+        name="owner_resources_newest",
+    )
+    db.Question_versions.create_index(
+        [("resource_id", 1), ("version_number", 1)],
+        unique=True, name="unique_resource_version",
+    )
+    db.Question_operations.create_index(
+        [("user_id", 1), ("request_id", 1)],
+        unique=True, name="unique_question_operation",
+    )
+    db.Question_links.create_index(
+        "question_id", unique=True, name="unique_question_link",
+    )
+    db.Question_links.create_index(
+        [("resource_id", 1), ("form_id", 1), ("question_id", 1)],
+        name="resource_usage",
+    )
+    db.Question_links.create_index(
+        [("resource_id", 1), ("version_id", 1), ("form_id", 1), ("question_id", 1)],
+        name="version_usage",
+    )
+    db.Question_shares.create_index(
+        [("version_id", 1), ("recipient_id", 1)],
+        unique=True, name="unique_version_recipient",
+    )
+    db.Question_shares.create_index(
+        [("recipient_id", 1), ("status", 1), ("authorized_at", -1), ("_id", -1)],
+        name="recipient_active_newest",
+    )
+    db.Question_shares.create_index(
+        [("resource_id", 1), ("version_id", 1), ("created_at", -1), ("_id", -1)],
+        name="version_shares_newest",
+    )
+    db.Question_banks.create_index(
+        [("owner_id", 1), ("created_at", -1), ("_id", -1)], name="owner_banks_newest",
+    )
+    db.Question_bank_members.create_index(
+        [("bank_id", 1), ("resource_id", 1)], unique=True, name="unique_bank_resource",
+    )
+    db.Question_bank_members.create_index(
+        [("bank_id", 1), ("added_at", -1), ("_id", -1)], name="bank_members_newest",
+    )
     db.Responses.create_index(
         [("form_id", 1), ("respondent_id", 1), ("request_id", 1)],
         unique=True, name="unique_submission_request",

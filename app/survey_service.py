@@ -168,6 +168,54 @@ class SurveyService:
 
         return self.transaction(callback)
 
+    def responses(self, form_id, user_id, page, page_size):
+        parsed_id = object_id(form_id)
+
+        def callback(session):
+            form = self.owned(parsed_id, user_id, session)
+            anonymous = form.get("allow_anonymous", False)
+            query = {"form_id": form["_id"]}
+            documents = list(
+                self.db.Responses.find(query, session=session).sort(
+                    [("submitted_at", 1), ("_id", 1)]
+                ).skip((page - 1) * page_size).limit(page_size)
+            )
+            usernames = {}
+            if not anonymous:
+                respondent_ids = [doc["respondent_id"] for doc in documents]
+                if respondent_ids:
+                    for user in self.db.Users.find(
+                        {"_id": {"$in": respondent_ids}}, {"username": 1}, session=session
+                    ):
+                        usernames[user["_id"]] = user["username"]
+            items = []
+            for doc in documents:
+                # 旧记录缺少 is_anonymous 时回退问卷设置，不能默认按实名展示。
+                is_anonymous = doc.get("is_anonymous", anonymous)
+                item = {
+                    "response_id": str(doc["_id"]),
+                    "submitted_at": doc["submitted_at"],
+                    "is_anonymous": is_anonymous,
+                    "answers": [
+                        {"question_id": answer["question_id"], "value": answer["value"]}
+                        for answer in doc.get("answers", [])
+                    ],
+                }
+                if not is_anonymous:
+                    respondent_id = doc["respondent_id"]
+                    item["respondent_id"] = str(respondent_id)
+                    item["respondent_username"] = usernames.get(respondent_id)
+                items.append(item)
+            return {
+                "form_id": str(form["_id"]),
+                "allow_anonymous": anonymous,
+                "items": items,
+                "total": self.db.Responses.count_documents(query, session=session),
+                "page": page, "page_size": page_size,
+            }
+
+        return self.transaction(callback)
+
     def add_question(self, form_id, user_id, data):
         def operation(form, session):
             questions = list(self.db.Questions.find({"form_id": form["_id"]}, session=session))
@@ -191,6 +239,25 @@ class SurveyService:
             elif option["option_id"] not in existing_ids:
                 reject("选项 ID 必须引用该题已有选项；新选项请省略 option_id")
 
+    def require_version_match(self, question, session):
+        link = self.db.Question_links.find_one(
+            {"question_id": question["_id"]}, session=session
+        )
+        if link is None:
+            return
+        version = self.db.Question_versions.find_one(
+            {"_id": link["version_id"], "resource_id": link["resource_id"]},
+            session=session,
+        )
+        if version is None:
+            raise APIError(4090, "关联的题目版本不存在", 409)
+        from app.question_resource_service import canonical_question_content
+
+        if canonical_question_content(question) != canonical_question_content(
+            version["content"]
+        ):
+            raise APIError(4090, "版本级内容不能直接编辑；请显式换版", 409)
+
     def edit_question(self, form_id, question_id, user_id, patch):
         parsed_question_id = object_id(question_id)
 
@@ -212,7 +279,33 @@ class SurveyService:
             self.assign_options(candidate, {o["option_id"] for o in original.get("options", [])})
             full = [candidate if q["_id"] == candidate["_id"] else q for q in questions]
             validate_form_questions(full)
+            self.require_version_match(candidate, session)
             self.db.Questions.replace_one({"_id": candidate["_id"]}, candidate, session=session)
+            return question_output(candidate)
+
+        return self.mutate(form_id, user_id, "draft", operation)
+
+    def set_question_required(self, form_id, question_id, user_id, required):
+        parsed_question_id = object_id(question_id)
+
+        def operation(form, session):
+            questions = list(self.db.Questions.find(
+                {"form_id": form["_id"]}, session=session
+            ))
+            original = next(
+                (q for q in questions if q["_id"] == parsed_question_id), None
+            )
+            if original is None:
+                raise APIError(4040, "题目不存在", 404)
+            candidate = deepcopy(original)
+            candidate.setdefault("validation", {})["required"] = required
+            full = [candidate if q["_id"] == candidate["_id"] else q for q in questions]
+            validate_form_questions(full)
+            self.require_version_match(candidate, session)
+            self.db.Questions.update_one(
+                {"_id": parsed_question_id, "form_id": form["_id"]},
+                {"$set": {"validation.required": required}}, session=session,
+            )
             return question_output(candidate)
 
         return self.mutate(form_id, user_id, "draft", operation)

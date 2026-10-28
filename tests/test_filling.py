@@ -40,6 +40,13 @@ def submit(env, form, answers, request_id=None, headers=None):
     )
 
 
+def responses(env, form, page=1, page_size=20, headers=None):
+    return env.client.get(
+        f"/surveys/{form['form_id']}/responses?page={page}&page_size={page_size}",
+        headers=env.owner if headers is None else headers,
+    )
+
+
 @pytest.mark.parametrize("multiple", [False, True])
 def test_same_request_retries_return_identical_success(survey_env, multiple):
     e = survey_env
@@ -125,6 +132,79 @@ def test_anonymity_is_taken_from_form_and_identity_not_returned(survey_env, anon
             json={"requestId": str(uuid4()), "answers": [item(q, "答案")], field: value},
         )
         error(response, 4001)
+
+
+def test_response_detail_real_name_shows_identity_in_submission_order(survey_env):
+    e = survey_env
+    form, q = setup_form(e, multiple=True)
+    first = ok(submit(e, form, [item(q, "第一次")]))
+    e.clock.now += timedelta(seconds=1)
+    second = ok(submit(e, form, [item(q, "第二次")]))
+    e.clock.now += timedelta(seconds=1)
+    third = ok(submit(e, form, [item(q, "第三次")], headers=e.owner))
+    data = ok(responses(e, form, page_size=2))
+    assert data["allow_anonymous"] is False and data["total"] == 3
+    assert data["page"] == 1 and data["page_size"] == 2 and data["form_id"] == form["form_id"]
+    assert [row["response_id"] for row in data["items"]] == [
+        first["response_id"], second["response_id"],
+    ]
+    row = data["items"][0]
+    assert set(row) == {
+        "response_id", "submitted_at", "is_anonymous", "answers",
+        "respondent_id", "respondent_username",
+    }
+    assert "request_id" not in row and "request_hash" not in row
+    assert row["is_anonymous"] is False
+    assert row["respondent_username"] == "reader"
+    assert row["respondent_id"] == str(e.db.Users.find_one({"username": "reader"})["_id"])
+    assert row["answers"] == [item(q, "第一次")]
+    second_page = ok(responses(e, form, page=2, page_size=2))
+    assert [row["response_id"] for row in second_page["items"]] == [third["response_id"]]
+    assert second_page["items"][0]["respondent_username"] == "owner"
+
+
+def test_response_detail_anonymous_hides_identity_but_keeps_record(survey_env):
+    e = survey_env
+    form, q = setup_form(e, anonymous=True)
+    ok(submit(e, form, [item(q, "匿名答案")]))
+    data = ok(responses(e, form))
+    assert data["allow_anonymous"] is True and data["total"] == 1
+    row = data["items"][0]
+    assert set(row) == {"response_id", "submitted_at", "is_anonymous", "answers"}
+    assert row["is_anonymous"] is True and row["answers"] == [item(q, "匿名答案")]
+    assert "respondent_id" not in row and "respondent_username" not in row
+    assert e.db.Responses.find_one()["respondent_id"] == (
+        e.db.Users.find_one({"username": "reader"})["_id"]
+    )
+
+
+@pytest.mark.parametrize("anonymous", [False, True])
+def test_response_detail_legacy_without_flag_falls_back_to_form_setting(survey_env, anonymous):
+    e = survey_env
+    form, q = setup_form(e, anonymous=anonymous)
+    ok(submit(e, form, [item(q, "新答案")]))
+    e.db.Responses.insert_one({
+        "form_id": ObjectId(form["form_id"]),
+        "respondent_id": e.db.Users.find_one({"username": "owner"})["_id"],
+        "submitted_at": e.clock.now - timedelta(hours=1), "answers": [item(q, "历史答案")],
+    })
+    rows = ok(responses(e, form))["items"]
+    legacy = rows[0]
+    assert legacy["answers"] == [item(q, "历史答案")]
+    assert legacy["is_anonymous"] is anonymous
+    assert ("respondent_id" in legacy) is (not anonymous)
+    if not anonymous:
+        assert legacy["respondent_username"] == "owner"
+
+
+def test_response_detail_is_owner_only_and_validates_ids(survey_env):
+    e = survey_env
+    form, _ = setup_form(e)
+    assert ok(responses(e, form))["items"] == []
+    error(responses(e, form, headers=e.reader), 4030, "无权限")
+    error(e.client.get("/surveys/not-an-id/responses", headers=e.owner), 4001, "ID 格式无效")
+    error(e.client.get(f"/surveys/{ObjectId()}/responses", headers=e.owner), 4040, "问卷不存在")
+    error(e.client.get(f"/surveys/{form['form_id']}/responses"), 4010)
 
 
 def test_progress_does_not_save_draft_and_returns_next_question(survey_env):

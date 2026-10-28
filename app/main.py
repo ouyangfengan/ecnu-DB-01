@@ -16,6 +16,9 @@ from app.config import Settings
 from app.database import create_indexes
 from app.errors import APIError, failure
 from app.filling import router as filling_router
+from app.question_banks import router as question_banks_router
+from app.question_resources import router as question_resources_router
+from app.question_shares import router as question_shares_router
 from app.security import new_token, password_hasher, utc_now
 from app.statistics import router as statistics_router
 from app.surveys import router as survey_router
@@ -73,7 +76,9 @@ def create_app(settings: Settings | None = None, clock=utc_now):
             custom = next((e for e in errors if e["type"] == "parameters"), None)
             if custom:
                 message = custom["msg"]
-            elif request.url.path.startswith("/surveys"):
+            elif request.url.path.startswith(
+                ("/surveys", "/question-resources", "/question-shares", "/question-banks")
+            ):
                 first = errors[0]
                 field = ".".join(str(part) for part in first["loc"][1:])
                 descriptions = {
@@ -114,6 +119,9 @@ def create_app(settings: Settings | None = None, clock=utc_now):
     application.include_router(survey_router)
     application.include_router(filling_router)
     application.include_router(statistics_router)
+    application.include_router(question_resources_router)
+    application.include_router(question_shares_router)
+    application.include_router(question_banks_router)
 
     @application.get("/", include_in_schema=False)
     @application.get("/ui", include_in_schema=False)

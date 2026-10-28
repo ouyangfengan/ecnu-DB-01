@@ -38,6 +38,8 @@ a { color: var(--brand-dark); }
 .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .08em; }
 .brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 12px; color: white; background: var(--brand); font-size: 17px; }
 .top-actions { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.top-user { color: var(--ink); font-weight: 650; }
 .main { width: min(960px, calc(100% - 36px)); min-height: calc(100vh - 68px); margin: 0 auto; padding: 42px 0 80px; }
 
 .eyebrow { margin: 0 0 9px; color: var(--brand); font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
